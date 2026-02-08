@@ -1,0 +1,25 @@
+name: devpod-provider-wsl
+version: ##VERSION##
+description: DevPod provider for WSL environments
+options:
+  WSL_DISTRO:
+    description: "WSL distribution name (e.g., Ubuntu-22.04)"
+    required: true
+  IDLE_TIMEOUT:
+    description: "Idle timeout in minutes before auto-stopping WSL"
+    default: "30"
+agent:
+  path: ${DEVPOD}
+  inactivityTimeout: ${IDLE_TIMEOUT}m
+binaries:
+  DEVPOD_PROVIDER_WSL:
+    - os: windows
+      arch: amd64
+      path: ./devpod-provider-wsl.exe
+      checksum: ##CHECKSUM_WINDOWS_AMD64##
+exec:
+  init: ${DEVPOD_PROVIDER_WSL} init
+  command: ${DEVPOD_PROVIDER_WSL} command
+  start: ${DEVPOD_PROVIDER_WSL} start
+  stop: ${DEVPOD_PROVIDER_WSL} stop
+  status: ${DEVPOD_PROVIDER_WSL} status
