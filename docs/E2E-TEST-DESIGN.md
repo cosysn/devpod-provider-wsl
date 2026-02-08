@@ -1,323 +1,305 @@
-# DevPod WSL Provider E2E 测试设计
+---
 
-## 概述
+## 配合 DevPod 的集成测试
 
-本文档定义了 DevPod WSL Provider 的端到端测试方案，确保在真实 WSL 环境下验证 provider 的所有功能。
+### 背景
 
-## 测试环境要求
+DevPod 通过 provider.yaml 配置和调用 WSL Provider。本节测试验证 provider 能正确与 DevPod 集成。
 
-### 硬件要求
-- Windows 10/11 系统
-- WSL 2 已启用
-- 已安装 WSL 发行版（如 Ubuntu-22.04）
+### TestDevPodInitProvider - DevPod 初始化 Provider
 
-### 软件要求
-- Go 1.21+
-- Windows 权限（执行 wsl.exe）
+**测试目的**:
+验证 DevPod 能正确初始化 WSL Provider
 
-### 环境变量
+**测试步骤**:
 ```bash
-export WSL_DISTRO=Ubuntu-22.04  # 测试用的 WSL 发行版
-export CI=true                    # CI 环境下跳过需要 WSL 的测试
+# 1. 添加 provider
+devpod provider add ./provider.yaml
+
+# 2. 设置 WSL 发行版
+devpod provider option set devpod-provider-wsl WSL_DISTRO Ubuntu-22.04
+
+# 3. 初始化（调用 init 命令）
+devpod provider init devpod-provider-wsl
 ```
 
-## 测试用例
+**验证点**:
+1. provider 添加成功
+2. 选项设置成功
+3. init 命令执行并输出检查结果
 
-### 1. TestStatus - 状态检测
+**预期输出**:
+```
+Checking WSL version...
+  WSL version: 2
+Distribution 'Ubuntu-22.04' found
+Disk space: OK (>= 5GB)
+Tools: OK ([git curl])
 
-**目的**: 验证 status 命令能正确检测 WSL 运行状态
+WSL environment check passed!
+```
+
+---
+
+### TestDevPodUpWorkspace - DevPod up workspace
+
+**测试目的**:
+验证 `devpod up` 能通过 WSL Provider 创建 workspace
 
 **前置条件**:
-- WSL 发行版已安装
+- provider 已配置
+- WSL 发行版存在
 
 **测试步骤**:
 ```bash
-# 1. 设置环境变量
-export WSL_DISTRO=Ubuntu-22.04
+# 设置工作目录（可选）
+export WORKSPACE_FOLDER=~/.devpod/workspaces
 
-# 2. 检查 WSL 是否存在
-wsl.exe -l -q | grep Ubuntu-22.04
-
-# 3. 运行测试
-devpod-provider-wsl.exe status
+# 创建 workspace
+devpod up github.com/example/my-project --provider devpod-provider-wsl
 ```
 
+**验证点**:
+1. DevPod 调用 provider command 命令
+2. 管道建立成功
+3. DevPod Agent 在 WSL 内启动
+4. Workspace 容器创建成功
+5. 返回可访问的 URL
+
 **预期结果**:
-- 返回 `Running` 或 `Stopped`
-- 退出码为 0
-
-**测试代码**:
-```go
-func TestStatus(t *testing.T) {
-    distro := getTestDistro()
-    t.Setenv("WSL_DISTRO", distro)
-
-    result, err := runCmd("status")
-    if err != nil {
-        t.Fatalf("status failed: %v", err)
-    }
-
-    result = strings.TrimSpace(result)
-    if result != "Running" && result != "Stopped" {
-        t.Errorf("unexpected status: %q", result)
-    }
-}
+```
+> DevPod v0.x.x
+> Provisioning workspace...
+> Using WSL provider (Ubuntu-22.04)
+> Starting DevPod agent...
+> Agent started
+> Creating container...
+> Container ready
+> Workspace URL: https://my-project.devpod.sh
 ```
 
 ---
 
-### 2. TestStartStop - 生命周期管理
+### TestDevPodDownWorkspace - DevPod down workspace
 
-**目的**: 验证 start 和 stop 命令能正确管理 WSL 生命周期
-
-**前置条件**:
-- WSL 发行版已安装
+**测试目的**:
+验证 `devpod down` 能正确停止 workspace
 
 **测试步骤**:
 ```bash
-# 1. 先停止 WSL
-devpod-provider-wsl.exe stop
-
-# 2. 启动 WSL
-devpod-provider-wsl.exe start
-
-# 3. 验证状态
-devpod-provider-wsl.exe status  # 应返回 Running
-
-# 4. 停止 WSL
-devpod-provider-wsl.exe stop
-
-# 5. 验证状态
-devpod-provider-wsl.exe status  # 应返回 Stopped
+devpod down my-project --provider devpod-provider-wsl
 ```
 
-**预期结果**:
-- start 后状态为 Running
-- stop 后状态为 Stopped
-- 无错误输出
-
-**测试代码**:
-```go
-func TestStartStop(t *testing.T) {
-    distro := getTestDistro()
-    t.Setenv("WSL_DISTRO", distro)
-
-    // Stop first
-    runCmd("stop")
-    time.Sleep(2 * time.Second)
-
-    // Start
-    _, err := runCmd("start")
-    if err != nil {
-        t.Fatalf("start failed: %v", err)
-    }
-
-    // Verify running
-    status, _ := runCmd("status")
-    if !strings.Contains(status, "Running") {
-        t.Errorf("expected Running, got: %s", status)
-    }
-
-    // Stop
-    _, err = runCmd("stop")
-    if err != nil {
-        t.Fatalf("stop failed: %v", err)
-    }
-
-    // Verify stopped
-    time.Sleep(2 * time.Second)
-    status, _ = runCmd("status")
-    if !strings.Contains(status, "Stopped") {
-        t.Errorf("expected Stopped, got: %s", status)
-    }
-}
-```
+**验证点**:
+1. 容器停止
+2. WSL 可能保持运行（或根据配置停止）
 
 ---
 
-### 3. TestInit - 环境检查
+### TestDevPodSSHConnection - DevPod SSH 连接
 
-**目的**: 验证 init 命令能正确检查 WSL 环境
+**测试目的**:
+验证通过 SSH 连接到 workspace
 
 **测试步骤**:
 ```bash
-export WSL_DISTRO=Ubuntu-22.04
-devpod-provider-wsl.exe init
+# 直接 SSH 连接
+devpod ssh my-project --provider devpod-provider-wSL
+
+# 或使用 SSH 配置
+ssh my-project.devpod
 ```
 
-**预期结果**:
-- 检查 WSL 版本（应为 WSL 2）
-- 检查发行版是否存在
-- 检查磁盘空间
-- 检查必要工具（git, curl）
-
-**测试代码**:
-```go
-func TestInit(t *testing.T) {
-    distro := getTestDistro()
-    t.Setenv("WSL_DISTRO", distro)
-
-    output, err := runCmd("init")
-
-    // init 可能在缺少工具时失败，这不算测试失败
-    t.Logf("init output: %s", output)
-    t.Logf("init error: %v", err)
-}
-```
+**验证点**:
+1. SSH 通过管道连接到 WSL 内
+2. 能执行命令
+3. 连接稳定
 
 ---
 
-### 4. TestHelp - 帮助命令
+### TestDevPodIDEConnection - DevPod IDE 连接
 
-**目的**: 验证所有命令的帮助信息正确
-
-**测试用例**:
-
-| 命令 | 预期包含 |
-|------|----------|
-| `--help` | Usage, 可用命令 |
-| `init --help` | "init" |
-| `command --help` | "command", "pipe" |
-| `start --help` | "start" |
-| `stop --help` | "stop" |
-| `status --help` | "status" |
-
-**测试代码**:
-```go
-func TestHelp(t *testing.T) {
-    tests := []struct {
-        name    string
-        command string
-        want    string
-    }{
-        {"init", "init", "init"},
-        {"command", "command", "command"},
-        {"start", "start", "start"},
-        {"stop", "stop", "stop"},
-        {"status", "status", "status"},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            output, err := runCmd(tt.command, "--help")
-            if err != nil {
-                t.Fatalf("%s --help failed: %v", tt.command, err)
-            }
-            if !strings.Contains(output, tt.want) {
-                t.Errorf("%s --help should contain %q", tt.command, tt.want)
-            }
-        })
-    }
-}
-```
-
----
-
-### 5. TestVersion - 版本信息
-
-**目的**: 验证版本命令正确输出
+**测试目的**:
+验证 VSCode 等 IDE 能通过 DevPod 连接到 workspace
 
 **测试步骤**:
 ```bash
-devpod-provider-wsl.exe --version
+# 打开 VSCode
+devpod up github.com/example/my-project --ide vscode --provider devpod-provider-wsl
 ```
 
-**预期结果**:
-- 输出版本号或 "dev"
+**验证点**:
+1. VSCode Remote SSH 连接建立
+2. 源码同步完成
+3. 终端功能正常
 
 ---
 
-### 6. TestMissingDistro - 错误处理
+### TestDevPodMultipleWorkspaces - 多 Workspace 测试
 
-**目的**: 验证缺少 WSL_DISTRO 时的错误处理
+**测试目的**:
+验证能同时管理多个 workspace
 
 **测试步骤**:
 ```bash
-unset WSL_DISTRO
-devpod-provider-wsl.exe status
+# 创建多个 workspace
+devpod up project-a --provider devpod-provider-wsl
+devpod up project-b --provider devpod-provider-wsl
+
+# 验证两个都运行
+devpod status
 ```
 
-**预期结果**:
-- 命令失败并返回错误信息
-- 退出码非 0
+**验证点**:
+1. 每个 workspace 有独立管道
+2. 无冲突
+3. 资源使用正常
 
 ---
 
-### 7. TestCommandHelp - Command 命令帮助
+### TestDevPodAgentLifecycle - Agent 生命周期
 
-**目的**: 验证 command 命令的帮助信息
+**测试目的**:
+验证 DevPod Agent 在 WSL 内的生命周期管理
 
 **测试步骤**:
 ```bash
-devpod-provider-wsl.exe command --help
+# 启动 workspace
+devpod up my-project
+
+# 等待空闲超时
+# 默认 30 分钟
+
+# 验证自动停止
+devpod status  # 应显示 Stopped
+
+# 重新连接
+devpod up my-project  # 应恢复
 ```
 
-**预期结果**:
-- 包含 "pipe" 相关描述
+**验证点**:
+1. Agent 正确检测空闲
+2. 自动关闭 WSL（根据配置）
+3. 状态恢复正确
 
 ---
 
-## 运行测试
+### DevPod 集成测试配置
 
-### 本地运行
+```yaml
+# provider.yaml (DevPod 集成)
+name: devpod-provider-wsl
+version: v0.0.1
+options:
+  WSL_DISTRO:
+    description: "WSL 发行版名称"
+    required: true
+    default: "Ubuntu-22.04"
+  IDLE_TIMEOUT:
+    description: "空闲超时时间（分钟）"
+    default: "30"
+agent:
+  path: ${DEVPOD}
+  inactivityTimeout: ${IDLE_TIMEOUT}m
+  exec:
+    shutdown: |-
+      ${DEVPOD_PROVIDER_WSL} stop
+binaries:
+  DEVPOD_PROVIDER_WSL:
+    - os: windows
+      arch: amd64
+      path: ./devpod-provider-wsl.exe
+exec:
+  init: ${DEVPOD_PROVIDER_WSL} init
+  command: ${DEVPOD_PROVIDER_WSL} command
+  start: ${DEVPOD_PROVIDER_WSL} start
+  stop: ${DEVPOD_PROVIDER_WSL} stop
+  status: ${DEVPOD_PROVIDER_WSL} status
+```
+
+---
+
+### DevPod 测试命令速查
+
+| 操作 | 命令 |
+|------|------|
+| 添加 provider | `devpod provider add ./provider.yaml` |
+| 设置选项 | `devpod provider option set devpod-provider-wsl WSL_DISTRO Ubuntu-22.04` |
+| 初始化 | `devpod provider init devpod-provider-wsl` |
+| 创建 workspace | `devpod up <repo> --provider devpod-provider-wsl` |
+| SSH 连接 | `devpod ssh <workspace>` |
+| 停止 | `devpod down <workspace>` |
+| 查看状态 | `devpod status` |
+| 删除 workspace | `devpod delete <workspace>` |
+| 删除 provider | `devpod provider delete devpod-provider-wsl` |
+
+---
+
+### CI 环境 DevPod 测试
+
 ```bash
-# 构建
-GOOS=windows go build -o devpod-provider-wsl.exe .
+# GitHub Actions 示例
+name: DevPod WSL E2E Tests
 
-# 运行所有 E2E 测试
-cd e2e
-GOOS=windows go test -tags wsl -v ./...
+on: [push, pull_request]
 
-# 运行特定测试
-GOOS=windows go test -tags wsl -v -run TestStatus ./...
-```
+jobs:
+  devpod-e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
 
-### CI 环境
-```bash
-# 设置环境变量
-export WSL_DISTRO=Ubuntu-22.04
-export CI=true
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-# 运行（会自动跳过需要 WSL 的测试）
-go test -tags wsl ./...
-```
+      - name: Build Provider
+        run: |
+          GOOS=windows go build -o devpod-provider-wsl.exe .
 
----
+      - name: Add Provider
+        run: |
+          devpod provider add ./provider.yaml
+          devpod provider option set devpod-provider-wsl WSL_DISTRO ${{ env.WSL_DISTRO }}
 
-## 测试结果模板
+      - name: Init Provider
+        run: devpod provider init devpod-provider-wsl
 
-```
-=== RUN   TestStatus
-    status_test.go:80: WSL status: Running
---- PASS: TestStatus (2.34s)
-=== RUN   TestStartStop
-    startstop_test.go:45: Stopping WSL...
-    startstop_test.go:50: Testing start command...
-    startstop_test.go:60: Testing stop command...
---- PASS: TestStartStop (8.45s)
-=== RUN   TestHelp
---- PASS: TestHelp (1.23s)
-=== RUN   TestVersion
---- PASS: TestVersion (0.05s)
-PASS
-ok      github.com/cosysn/devpod-provider-wsl/e2e   12.07s
+      - name: Run E2E Tests
+        run: go test -tags e2e -v ./e2e/...
+        env:
+          WSL_DISTRO: ${{ env.WSL_DISTRO }}
 ```
 
 ---
 
-## 注意事项
+## 测试覆盖总结
 
-1. **测试顺序**: 先运行 status/start/stop，最后运行 init
-2. **等待时间**: start/stop 后等待 2-3 秒让 WSL 状态稳定
-3. **清理**: 测试结束后确保 WSL 处于停止状态（如需要）
-4. **权限**: 需要管理员权限执行 wsl.exe
-5. **超时**: CI 环境下自动跳过需要 WSL 的测试
+### 功能覆盖
 
----
+| 分类 | 测试数 | P0 | P1 |
+|------|--------|----|----|
+| 基础命令 | 5 | 3 | 2 |
+| 生命周期 | 2 | 2 | 0 |
+| 错误处理 | 3 | 1 | 2 |
+| 管道测试 | 2 | 1 | 1 |
+| SSH/性能 | 3 | 0 | 3 |
+| DevPod 集成 | 6 | 2 | 4 |
+| **总计** | **21** | **9** | **12** |
 
-## 后续扩展
+### 测试优先级
 
-- [ ] TestCommandPipe - 测试 command 管道建立
-- [ ] TestMultiDistro - 测试多个发行版
-- [ ] TestDiskSpaceError - 测试磁盘空间不足场景
-- [ ] TestToolMissing - 测试工具缺失场景
+**P0 (必须通过)**:
+1. TestStatus
+2. TestStartStop
+3. TestInit
+4. TestCommandTimeout
+5. TestWSLNotRunningStart
+6. TestFullWorkflow
+7. TestDevPodInitProvider
+8. TestDevPodUpWorkspace
+9. TestMultiSSHClient
+
+**P1 (应该通过)**:
+- 其余测试
