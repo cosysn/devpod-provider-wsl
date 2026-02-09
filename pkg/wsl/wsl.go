@@ -1,9 +1,14 @@
 package wsl
 
 import (
+	"bytes"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
 type WSL struct {
@@ -37,13 +42,37 @@ func getVersionFromOutput(output string) (int, error) {
 func (w *WSL) Exists() bool {
 	cmd := exec.Command("wsl.exe", "-l", "-q")
 	output, _ := cmd.Output()
+
+	// Try UTF-16 to UTF-8 decoding (Windows console often uses UTF-16)
+	outputStr, _ := decodeUTF16(output)
+	if outputStr != "" {
+		return checkDistroExists(outputStr, w.Distro)
+	}
+
 	return checkDistroExists(string(output), w.Distro)
+}
+
+// decodeUTF16 attempts to decode UTF-16 encoded output to UTF-8
+func decodeUTF16(input []byte) (string, error) {
+	if len(input) < 2 {
+		return "", nil
+	}
+	// Check if it looks like UTF-16 (even bytes suggest UTF-16-LE)
+	enc := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	reader := transform.NewReader(bytes.NewReader(input), enc.NewDecoder())
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(result), nil
 }
 
 func checkDistroExists(output, distro string) bool {
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		if strings.TrimSpace(line) == distro {
+		trimmed := strings.TrimSpace(strings.ToLower(line))
+		distroLower := strings.ToLower(distro)
+		if trimmed == distroLower {
 			return true
 		}
 	}

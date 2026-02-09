@@ -1,0 +1,42 @@
+{
+  "name": "devpod-provider-wsl",
+  "version": "v0.0.1",
+  "description": "DevPod provider for WSL environments",
+  "options": {
+    "WSL_DISTRO": {
+      "description": "WSL distribution name",
+      "required": true,
+      "default": "codepod-desktop"
+    },
+    "IDLE_TIMEOUT": {
+      "description": "Idle timeout in minutes before auto-stopping WSL (0 to disable)",
+      "default": "30"
+    }
+  },
+  "agent": {
+    "inactivityTimeout": "${IDLE_TIMEOUT}m"
+  },
+  "binaries": {
+    "DEVPOD_PROVIDER_WSL": [
+      {
+        "os": "windows",
+        "arch": "amd64",
+        "path": "./devpod-provider-wsl.exe"
+      }
+    ]
+  },
+  "exec": {
+    "init": "${DEVPOD_PROVIDER_WSL} init",
+    "command": "${DEVPOD_PROVIDER_WSL} command",
+    "start": "${DEVPOD_PROVIDER_WSL} start",
+    "stop": "${DEVPOD_PROVIDER_WSL} stop",
+    "status": "${DEVPOD_PROVIDER_WSL} status",
+    "create": {
+      "exec": "${DEVPOD_PROVIDER_WSL} command"
+    },
+    "delete": {
+      "exec": "${DEVPOD_PROVIDER_WSL} stop",
+      "condition": "always"
+    }
+  }
+}

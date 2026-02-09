@@ -9,17 +9,17 @@ import (
 
 // CreateNamedPipe creates a Windows named pipe server
 func CreateNamedPipe(name string) (net.Listener, error) {
-	namePtr, err := windows.UTF16PtrFromString(name)
+	path := `\\.\pipe\` + name
+	pathPtr, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
 
-	// Pipe mode flags
-	openMode := uint32(windows.PIPE_ACCESS_DUPLEX) // read/write access
+	openMode := uint32(windows.PIPE_ACCESS_DUPLEX | windows.FILE_FLAG_OVERLAPPED)
 	pipeMode := uint32(windows.PIPE_TYPE_BYTE | windows.PIPE_READMODE_BYTE | windows.PIPE_WAIT)
 
 	handle, err := windows.CreateNamedPipe(
-		namePtr,
+		pathPtr,
 		openMode,
 		pipeMode,
 		uint32(windows.PIPE_UNLIMITED_INSTANCES),
@@ -33,12 +33,11 @@ func CreateNamedPipe(name string) (net.Listener, error) {
 		return nil, err
 	}
 
-	// Create os.File from handle
 	f := os.NewFile(uintptr(handle), name)
 	return net.FileListener(f)
 }
 
 // GeneratePipeName generates a unique pipe name for a distro
 func GeneratePipeName(distro string) string {
-	return `\\.\pipe\devpod-wsl-` + distro
+	return `devpod-wsl-` + distro
 }

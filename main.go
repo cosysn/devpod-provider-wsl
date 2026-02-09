@@ -18,6 +18,8 @@ func main() {
 
 	rootCmd.AddCommand(
 		cmd.InitCmd,
+		cmd.CreateCmd,
+		cmd.DeleteCmd,
 		cmd.CommandCmd,
 		cmd.StartCmd,
 		cmd.StopCmd,
