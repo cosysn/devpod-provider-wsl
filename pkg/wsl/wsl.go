@@ -2,14 +2,38 @@ package wsl
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/cosysn/devpod-provider-wsl/pkg/options"
+	"github.com/loft-sh/devpod/pkg/log"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
+
+type WslProvider struct {
+	Config           *options.Options
+	Log              log.Logger
+	WorkingDirectory string
+}
+
+func NewProvider(ctx context.Context, logs log.Logger) (*WslProvider, error) {
+	config, err := options.FromEnv(false, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// create provider
+	provider := &WslProvider{
+		Config: config,
+		Log:    logs,
+	}
+
+	return provider, nil
+}
 
 type WSL struct {
 	Distro string

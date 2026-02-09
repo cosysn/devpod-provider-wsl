@@ -9,15 +9,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// CreateCmd holds the cmd flags
-type CreateCmd struct{}
+// DeleteCmd holds the cmd flags
+type DeleteCmd struct{}
 
-// NewCreateCmd defines a command
-func NewCreateCmd() *cobra.Command {
-	cmd := &CreateCmd{}
-	createCmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create an instance",
+// NewDeleteCmd defines a command
+func NewDeleteCmd() *cobra.Command {
+	cmd := &DeleteCmd{}
+	deleteCmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete an instance",
 		RunE: func(_ *cobra.Command, args []string) error {
 			wslProvider, err := wsl.NewProvider(context.Background(), log.Default)
 			if err != nil {
@@ -33,11 +33,11 @@ func NewCreateCmd() *cobra.Command {
 		},
 	}
 
-	return createCmd
+	return deleteCmd
 }
 
 // Run runs the command logic
-func (cmd *CreateCmd) Run(
+func (cmd *DeleteCmd) Run(
 	ctx context.Context,
 	providerWsl *wsl.WslProvider,
 	machine *provider.Machine,

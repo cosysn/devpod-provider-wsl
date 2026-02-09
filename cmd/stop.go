@@ -2,39 +2,69 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/spf13/cobra"
+	"context"
+
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
+	"github.com/loft-sh/devpod/pkg/log"
+	"github.com/loft-sh/devpod/pkg/provider"
+	"github.com/spf13/cobra"
 )
 
-var StopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop WSL distribution",
-	Long: `Stop the specified WSL distribution.
-This command terminates the WSL virtual machine.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		distro := os.Getenv("WSL_DISTRO")
-		if distro == "" {
-			return fmt.Errorf("WSL_DISTRO environment variable is required")
-		}
+// StopCmd holds the cmd flags
+type StopCmd struct{}
 
-		w := wsl.WSL{Distro: distro}
+// NewStopCmd defines a stop command
+func NewStopCmd() *cobra.Command {
+	cmd := &StopCmd{}
+	stopCmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop WSL distribution",
+		RunE: func(_ *cobra.Command, args []string) error {
+			wslProvider, err := wsl.NewProvider(context.Background(), log.Default)
+			if err != nil {
+				return err
+			}
 
-		// Check if running
-		status := w.Status()
-		if status != "Running" {
-			cmd.Printf("Distribution '%s' is not running\n", distro)
-			return nil
-		}
+			return cmd.Run(
+				context.Background(),
+				wslProvider,
+				provider.FromEnvironment(),
+				log.Default,
+			)
+		},
+	}
 
-		// Stop the distribution
-		cmd.Printf("Stopping distribution '%s'...\n", distro)
-		if err := w.Stop(); err != nil {
-			return fmt.Errorf("stop failed: %w", err)
-		}
+	return stopCmd
+}
 
-		cmd.Printf("Distribution '%s' stopped successfully\n", distro)
+// Run runs the command logic
+func (cmd *StopCmd) Run(
+	ctx context.Context,
+	providerWsl *wsl.WslProvider,
+	machine *provider.Machine,
+	logs log.Logger,
+) error {
+	distro := providerWsl.Config.WSLDistro
+	if distro == "" {
+		return fmt.Errorf("WSL_DISTRO environment variable is required")
+	}
+
+	w := wsl.WSL{Distro: distro}
+
+	// Check if running
+	status := w.Status()
+	if status != "Running" {
+		fmt.Printf("Distribution '%s' is not running\n", distro)
 		return nil
-	},
+	}
+
+	// Stop the distribution
+	fmt.Printf("Stopping distribution '%s'...\n", distro)
+	if err := w.Stop(); err != nil {
+		return fmt.Errorf("stop failed: %w", err)
+	}
+
+	fmt.Printf("Distribution '%s' stopped successfully\n", distro)
+	return nil
 }

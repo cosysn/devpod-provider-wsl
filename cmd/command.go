@@ -1,41 +1,48 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
+	"context"
 
+	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
+	"github.com/loft-sh/devpod/pkg/log"
+	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/spf13/cobra"
 )
 
-var CommandCmd = &cobra.Command{
-	Use:   "command",
-	Short: "Establish persistent pipe to WSL",
-	Long: `Establish a persistent communication pipe between Windows and WSL.
-This command is used by DevPod to communicate with the WSL environment.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		distro := os.Getenv("WSL_DISTRO")
-		if distro == "" {
-			return fmt.Errorf("WSL_DISTRO environment variable is required")
-		}
+// CommandCmd holds the cmd flags
+type CommandCmd struct{}
 
-		return runCommand(distro, cmd)
-	},
-}
+// NewCommandCmd defines a command
+func NewCommandCmd() *cobra.Command {
+	cmd := &CommandCmd{}
+	commandCmd := &cobra.Command{
+		Use:   "command",
+		Short: "Command an instance",
+		RunE: func(_ *cobra.Command, args []string) error {
+			wslProvider, err := wsl.NewProvider(context.Background(), log.Default)
+			if err != nil {
+				return err
+			}
 
-func runCommand(distro string, cobraCmd *cobra.Command) error {
-	// Run a shell in WSL that connects to devpod agent via stdio
-	// This allows DevPod to communicate with the WSL environment
-	wslCmd := exec.Command("wsl.exe", "-d", distro)
-
-	// Connect stdin/stdout/stderr for bidirectional communication
-	wslCmd.Stdin = os.Stdin
-	wslCmd.Stdout = os.Stdout
-	wslCmd.Stderr = os.Stderr
-
-	if err := wslCmd.Start(); err != nil {
-		return fmt.Errorf("start wsl: %w", err)
+			return cmd.Run(
+				context.Background(),
+				wslProvider,
+				provider.FromEnvironment(),
+				log.Default,
+			)
+		},
 	}
 
-	return wslCmd.Wait()
+	return commandCmd
+}
+
+// Run runs the command logic
+func (cmd *CommandCmd) Run(
+	ctx context.Context,
+	providerWsl *wsl.WslProvider,
+	machine *provider.Machine,
+	logs log.Logger,
+) error {
+	logs.Infof("Commanding workspace in WSL distribution '%s'...", providerWsl.Config.WSLDistro)
+	return nil
 }
