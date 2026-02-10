@@ -10,7 +10,7 @@ import (
 )
 
 var checksumMap = map[string]string{
-	"./release/devpod-provider-wsl-windows-amd64.exe": "##CHECKSUM_WINDOWS_AMD64##",
+	"./release/devpod-provider-wsl-amd64.exe": "##CHECKSUM_WINDOWS_AMD64##",
 }
 
 func main() {
