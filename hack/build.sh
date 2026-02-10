@@ -3,24 +3,25 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-# Build parameters
 VERSION=${1:-"v0.0.1"}
 LDFLAGS="-s -w -X main.version=${VERSION}"
 
 echo "Building devpod-provider-wsl ${VERSION}..."
 echo ""
 
-# Create release directory
-mkdir -p release
+# Step 1: 构建 Linux agent
+echo "[1/3] Building Linux agent..."
+GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o agent-linux .
 
-# Build for Windows AMD64
-echo "[1/2] Building for Windows AMD64..."
-GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" \
-    -o release/devpod-provider-wsl-windows-amd64.exe \
-    .
+# Step 2: 构建 Windows provider (嵌入 agent)
+echo "[2/3] Building Windows provider..."
+GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o release/devpod-provider-wsl-amd64.exe .
 
-# Generate provider.yaml
-echo "[2/2] Generating provider.yaml..."
+# 清理临时文件
+rm -f agent-linux
+
+# Step 3: 生成 provider.yaml
+echo "[3/3] Generating provider.yaml..."
 go run ./hack/provider/main.go ${VERSION} > provider.yaml
 
 echo ""
@@ -28,14 +29,5 @@ echo "========================================"
 echo "Build complete!"
 echo "========================================"
 echo ""
-echo "Binary: release/devpod-provider-wsl-windows-amd64.exe"
+echo "Binary: release/devpod-provider-wsl-amd64.exe"
 echo "Provider: provider.yaml"
-echo ""
-echo "Usage:"
-echo "  ./hack/build.sh v0.0.1"
-echo ""
-echo "Add to DevPod:"
-echo "  devpod provider add ./provider.yaml"
-echo ""
-echo "Configure provider:"
-echo "  devpod provider option set devpod-provider-wsl WSL_DISTRO Ubuntu-22.04"
