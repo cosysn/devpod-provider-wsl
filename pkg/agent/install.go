@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -35,8 +36,11 @@ func InstallAgent(data []byte, distro string) error {
 
 func needsUpgrade(distro string) bool {
 	cmd := exec.Command("wsl.exe", "-d", distro, "-e", "sh", "-c",
-		fmt.Sprintf("[ -f %s ] && %s --version 2>/dev/null || echo 'not found'", AgentPath, AgentPath))
-	output, _ := cmd.Output()
+		fmt.Sprintf("[ -f '%s' ] && '%s' --version 2>/dev/null || echo 'not found'", AgentPath, AgentPath))
+	output, err := cmd.Output()
+	if err != nil {
+		return true // If command fails, assume upgrade needed
+	}
 	return !strings.Contains(string(output), AgentVersion)
 }
 
@@ -46,10 +50,9 @@ func removeAgent(distro string) error {
 }
 
 func writeAgent(data []byte, distro string) error {
-	// 通过 stdin 传入 WSL
 	cmd := exec.Command("wsl.exe", "-d", distro, "-e", "sh", "-c",
-		fmt.Sprintf("cat > %s", AgentPath))
-	cmd.Stdin = strings.NewReader(string(data))
+		fmt.Sprintf("cat > '%s'", AgentPath))
+	cmd.Stdin = bytes.NewReader(data)
 	return cmd.Run()
 }
 
