@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
 
+	"github.com/cosysn/devpod-provider-wsl/pkg/agent"
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
@@ -48,6 +50,15 @@ func (cmd *CommandCmd) Run(
 	logs log.Logger,
 ) error {
 	distro := providerWsl.Config.WSLDistro
+
+	// 注入 agent 到 WSL
+	agentData, err := agent.GetAgent()
+	if err != nil {
+		return fmt.Errorf("get embedded agent: %w", err)
+	}
+	if err := agent.InstallAgent(agentData, distro); err != nil {
+		return fmt.Errorf("install agent: %w", err)
+	}
 
 	// 1. 获取 DevPod 传入的原始指令
 	targetCommand := os.Getenv("COMMAND")
