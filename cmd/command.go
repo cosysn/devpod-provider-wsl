@@ -56,8 +56,10 @@ func (cmd *CommandCmd) Run(
 	if err != nil {
 		return fmt.Errorf("get embedded agent: %w", err)
 	}
-	if err := agent.InstallAgent(agentData, distro); err != nil {
-		return fmt.Errorf("install agent: %w", err)
+	if len(agentData) > 0 {
+		if err := agent.InstallAgent(agentData, distro); err != nil {
+			return fmt.Errorf("install agent: %w", err)
+		}
 	}
 
 	// 1. 获取 DevPod 传入的原始指令

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	AgentPath    = "/tmp/devpod-agent"
+	AgentPath    = "/var/tmp/devpod-agent"
 	AgentVersion = "v0.0.1" // 硬编码版本号
 )
 

@@ -16,7 +16,7 @@ binaries:
     - os: windows
       arch: amd64
       path: ./devpod-provider-wsl.exe
-      checksum: a36b619dcf313c06687dd2a32a23093826e54fda0bd307430d52170ab47b64d0
+      checksum: b6d92689b0174c77422f8c7f4ae020dcfaa8458dbd5acf18709024b9acac5dbb
 exec:
   init: ${DEVPOD_PROVIDER_WSL} init
   command: ${DEVPOD_PROVIDER_WSL} command
