@@ -1,3 +1,6 @@
+//go:build embed
+// +build embed
+
 package agent
 
 import "embed"
@@ -8,3 +11,4 @@ var Agent embed.FS
 func GetAgent() ([]byte, error) {
 	return Agent.ReadFile("agent-linux")
 }
+
