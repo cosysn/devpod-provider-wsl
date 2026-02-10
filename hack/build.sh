@@ -15,6 +15,7 @@ GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o agent-linux .
 
 # Step 2: 构建 Windows provider (嵌入 agent)
 echo "[2/3] Building Windows provider..."
+mkdir -p release
 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o release/devpod-provider-wsl-amd64.exe .
 
 # 清理临时文件
