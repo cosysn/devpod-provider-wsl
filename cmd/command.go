@@ -70,6 +70,9 @@ func (cmd *CommandCmd) Run(
 		os.Exit(1)
 	}
 
+	// 调试日志：打印命令前 200 个字符
+	logs.Infof("COMMAND: %.200s...", targetCommand)
+
 	if isWindows() {
 		return cmd.runOnWindows(ctx, distro, targetCommand, logs)
 	}
