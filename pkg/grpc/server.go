@@ -10,19 +10,21 @@ import (
 	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
 )
 
-type Server struct {
+// WSLServer implements the DevPodWSLServiceServer interface
+type WSLServer struct {
 	pb.UnimplementedDevPodWSLServiceServer
 	processes map[int]*exec.Cmd
 	mu        sync.Mutex
 }
 
-func NewServer() *Server {
-	return &Server{
+// NewWSLServer creates a new WSLServer instance
+func NewWSLServer() *WSLServer {
+	return &WSLServer{
 		processes: make(map[int]*exec.Cmd),
 	}
 }
 
-func (s *Server) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartResponse, error) {
+func (s *WSLServer) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartResponse, error) {
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", req.Command)
 	cmd.Dir = req.Workdir
 
@@ -60,7 +62,7 @@ func (s *Server) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartResp
 	return &pb.StartResponse{Pid: int32(cmd.Process.Pid)}, nil
 }
 
-func (s *Server) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
+func (s *WSLServer) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
 	s.mu.Lock()
 	cmd, ok := s.processes[int(req.Pid)]
 	s.mu.Unlock()
@@ -79,7 +81,7 @@ func (s *Server) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopRespons
 	return &pb.StopResponse{ExitCode: 0}, nil
 }
 
-func (s *Server) Exec(stream pb.DevPodWSLService_ExecServer) error {
+func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -111,22 +113,22 @@ func (s *Server) Exec(stream pb.DevPodWSLService_ExecServer) error {
 	}
 }
 
-func (s *Server) Stdin(stream pb.DevPodWSLService_StdinServer) error {
+func (s *WSLServer) Stdin(stream pb.DevPodWSLService_StdinServer) error {
 	return nil
 }
 
-func (s *Server) Stdout(req *pb.Empty, stream pb.DevPodWSLService_StdoutServer) error {
+func (s *WSLServer) Stdout(req *pb.Empty, stream pb.DevPodWSLService_StdoutServer) error {
 	return nil
 }
 
-func (s *Server) Stderr(req *pb.Empty, stream pb.DevPodWSLService_StderrServer) error {
+func (s *WSLServer) Stderr(req *pb.Empty, stream pb.DevPodWSLService_StderrServer) error {
 	return nil
 }
 
-func (s *Server) Status(ctx context.Context, req *pb.Empty) (*pb.AgentStatus, error) {
+func (s *WSLServer) Status(ctx context.Context, req *pb.Empty) (*pb.AgentStatus, error) {
 	return &pb.AgentStatus{Running: true}, nil
 }
 
-func (s *Server) Upload(stream pb.DevPodWSLService_UploadServer) error {
+func (s *WSLServer) Upload(stream pb.DevPodWSLService_UploadServer) error {
 	return nil
 }

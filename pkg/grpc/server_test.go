@@ -8,7 +8,7 @@ import (
 )
 
 func TestServer_Start(t *testing.T) {
-	server := NewServer()
+	server := NewWSLServer()
 
 	resp, err := server.Start(context.Background(), &pb.StartRequest{
 		Command: "echo hello",
@@ -28,7 +28,7 @@ func TestServer_Start(t *testing.T) {
 }
 
 func TestServer_StartWithEnv(t *testing.T) {
-	server := NewServer()
+	server := NewWSLServer()
 
 	resp, err := server.Start(context.Background(), &pb.StartRequest{
 		Command: "echo $TEST_VAR",
@@ -48,7 +48,7 @@ func TestServer_StartWithEnv(t *testing.T) {
 }
 
 func TestServer_Stop(t *testing.T) {
-	server := NewServer()
+	server := NewWSLServer()
 
 	// Start a long-running process
 	startResp, err := server.Start(context.Background(), &pb.StartRequest{
