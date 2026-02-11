@@ -11,7 +11,7 @@ echo ""
 
 # Step 1: 构建 Linux agent (不嵌入，使用 stub)
 echo "[1/3] Building Linux agent..."
-GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o agent-linux .
+GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o agent-linux ./agent
 
 # Step 2: 复制到 embed 目录并构建 Windows provider (嵌入)
 echo "[2/3] Building Windows provider..."
