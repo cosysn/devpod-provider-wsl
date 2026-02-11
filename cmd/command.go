@@ -17,7 +17,6 @@ import (
 	grpcClient "github.com/cosysn/devpod-provider-wsl/pkg/grpc"
 	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
-	"github.com/creack/pty"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/spf13/cobra"
@@ -77,7 +76,7 @@ func (cmd *CommandCmd) Run(
 	return cmd.runOnLinux(ctx, distro, targetCommand, logs)
 }
 
-// runOnWindows Windows 环境下使用 PTY
+// runOnWindows Windows 环境下使用 stdin pipe
 func (cmd *CommandCmd) runOnWindows(
 	ctx context.Context,
 	distro, targetCommand string,
@@ -104,48 +103,37 @@ func (cmd *CommandCmd) runOnWindows(
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
-	// 创建 PTY 以支持交互式命令
-	ptyFile, err := pty.Start(wslcmd)
+	stdin, err := wslcmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("failed to start PTY: %w", err)
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
-	defer ptyFile.Close()
 
-	// 处理信号
+	wslcmd.Stdout = os.Stdout
+	wslcmd.Stderr = os.Stderr
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		for {
 			select {
-			case sig := <-sigChan:
-				ptyFile.Write([]byte(sig.String()))
+			case <-sigChan:
+				wslcmd.Process.Kill()
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// 异步读取 PTY 输出到 stdout/stderr
+	if err := wslcmd.Start(); err != nil {
+		return fmt.Errorf("failed to start wsl: %w", err)
+	}
+
+	// 转发 stdin 到 WSL
 	go func() {
-		io.Copy(os.Stdout, ptyFile)
-		io.Copy(os.Stderr, ptyFile)
+		io.Copy(stdin, os.Stdin)
+		stdin.Close()
 	}()
 
-	// 异步读取 stdin 并过滤 CR 后写入 PTY
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				ptyFile.Write(buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-	}()
-
-	// 等待命令完成
 	err = wslcmd.Wait()
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
