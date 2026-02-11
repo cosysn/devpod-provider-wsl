@@ -17,6 +17,7 @@ import (
 	grpcClient "github.com/cosysn/devpod-provider-wsl/pkg/grpc"
 	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
+	"github.com/creack/pty"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/spf13/cobra"
@@ -70,16 +71,13 @@ func (cmd *CommandCmd) Run(
 		os.Exit(1)
 	}
 
-	// 调试日志：打印命令前 200 个字符
-	logs.Infof("COMMAND: %.200s...", targetCommand)
-
 	if isWindows() {
 		return cmd.runOnWindows(ctx, distro, targetCommand, logs)
 	}
 	return cmd.runOnLinux(ctx, distro, targetCommand, logs)
 }
 
-// runOnWindows Windows 环境下使用 stdin pipe
+// runOnWindows Windows 环境下使用 PTY
 func (cmd *CommandCmd) runOnWindows(
 	ctx context.Context,
 	distro, targetCommand string,
@@ -106,57 +104,56 @@ func (cmd *CommandCmd) runOnWindows(
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
-	stdin, err := wslcmd.StdinPipe()
+	// 创建 PTY 以支持交互式命令
+	ptyFile, err := pty.Start(wslcmd)
 	if err != nil {
-		logs.Errorf("Failed to create stdin pipe: %v", err)
-		return err
+		return fmt.Errorf("failed to start PTY: %w", err)
 	}
+	defer ptyFile.Close()
 
-	wslcmd.Stdout = os.Stdout
-	wslcmd.Stderr = os.Stderr
-
+	// 处理信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		select {
-		case <-sigChan:
-			if wslcmd.Process != nil {
-				_ = wslcmd.Process.Kill()
+		for {
+			select {
+			case sig := <-sigChan:
+				ptyFile.Write([]byte(sig.String()))
+			case <-ctx.Done():
+				return
 			}
-		case <-ctx.Done():
 		}
 	}()
 
-	if err := wslcmd.Start(); err != nil {
-		logs.Errorf("WSL execution error: %v", err)
-		return err
-	}
+	// 异步读取 PTY 输出到 stdout/stderr
+	go func() {
+		io.Copy(os.Stdout, ptyFile)
+		io.Copy(os.Stderr, ptyFile)
+	}()
 
-	// 转发 stdin 到 WSL（过滤 Windows 换行符 CR）
+	// 异步读取 stdin 并过滤 CR 后写入 PTY
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, readErr := os.Stdin.Read(buf)
+			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				// 过滤掉 \r 字符
 				filtered := filterCRBytes(buf[:n])
 				if len(filtered) > 0 {
-					stdin.Write(filtered)
+					ptyFile.Write(filtered)
 				}
 			}
-			if readErr != nil {
+			if err != nil {
 				break
 			}
 		}
-		stdin.Close()
 	}()
 
+	// 等待命令完成
 	err = wslcmd.Wait()
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitError.ExitCode())
 		}
-		logs.Errorf("WSL process finished with error: %v", err)
 		return err
 	}
 
