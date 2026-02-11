@@ -6,9 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/cosysn/devpod-provider-wsl/pkg/agent"
+	"github.com/cosysn/devpod-provider-wsl/pkg/tunnel"
+	grpcClient "github.com/cosysn/devpod-provider-wsl/pkg/grpc"
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
@@ -42,7 +46,12 @@ func NewCommandCmd() *cobra.Command {
 	return commandCmd
 }
 
-// Run 负责处理 devpod-provider-wsl.exe command 的核心逻辑
+// isWindows 检测当前是否运行在 Windows 上
+func isWindows() bool {
+	return runtime.GOOS == "windows"
+}
+
+// Run 负责处理 devpod-provider-wsl command 的核心逻辑
 func (cmd *CommandCmd) Run(
 	ctx context.Context,
 	providerWsl *wsl.WslProvider,
@@ -51,6 +60,25 @@ func (cmd *CommandCmd) Run(
 ) error {
 	distro := providerWsl.Config.WSLDistro
 
+	// 获取原始指令
+	targetCommand := os.Getenv("COMMAND")
+	if targetCommand == "" {
+		logs.Errorf("COMMAND environment variable is required")
+		os.Exit(1)
+	}
+
+	if isWindows() {
+		return cmd.runOnWindows(ctx, distro, targetCommand, logs)
+	}
+	return cmd.runOnLinux(ctx, distro, targetCommand, logs)
+}
+
+// runOnWindows Windows 环境下使用 stdin pipe
+func (cmd *CommandCmd) runOnWindows(
+	ctx context.Context,
+	distro, targetCommand string,
+	logs log.Logger,
+) error {
 	// 注入 agent 到 WSL
 	agentData, err := agent.GetAgent()
 	if err != nil {
@@ -62,43 +90,25 @@ func (cmd *CommandCmd) Run(
 		}
 	}
 
-	// 1. 获取 DevPod 传入的原始指令
-	targetCommand := os.Getenv("COMMAND")
-	if targetCommand == "" {
-		logs.Errorf("COMMAND environment variable is required")
-		os.Exit(1)
-	}
-
-	// 2. 净化环境：通过环境变量压制 WSL 的系统级警告（如代理提示、编码提示）
-	// WSL_UTF8=1: 强制 UTF-8 编码
-	// WSL_PROXY=0: 尝试压制自动代理警告（部分版本支持）
-	// DONT_SET_WSL_PROXY: 压制某些特定版本的网络警告
+	// 净化环境
 	os.Setenv("WSL_UTF8", "1")
 	os.Setenv("WSL_PROXY", "0")
 	os.Setenv("DONT_SET_WSL_PROXY", "1")
 
-	// 3. 构建 WSL 启动参数
-	// -d: 指定分发版
-	// --: 停止 wsl.exe 参数解析，后续全传给 bash
-	// --noprofile, --norc: 核心！跳过 .bashrc, 杜绝欢迎词污染 Stdout
-	// -s: 让 bash 从标准输入读取指令
+	// 构建 WSL 启动参数
 	wslArgs := []string{"-d", distro, "--", "bash", "--noprofile", "--norc", "-s"}
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
-	// 4. 核心：建立 Stdin 管道，用于无损传输 targetCommand
 	stdin, err := wslcmd.StdinPipe()
 	if err != nil {
 		logs.Errorf("Failed to create stdin pipe: %v", err)
 		return err
 	}
 
-	// 5. 流量绑定：将 WSL 的输出直接接到本地，但仅限 Stdout
 	wslcmd.Stdout = os.Stdout
-	// 将 Stderr 接到本地 Stderr，这样 wsl: 检测到代理 这种警告会显示在终端但不会干扰数据
 	wslcmd.Stderr = os.Stderr
 
-	// 6. 信号监听与平滑处理
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -111,42 +121,82 @@ func (cmd *CommandCmd) Run(
 		}
 	}()
 
-	// 7. 启动 WSL 进程
 	if err := wslcmd.Start(); err != nil {
 		logs.Errorf("WSL execution error: %v", err)
 		return err
 	}
 
-	// 8. 异步注入指令：解决转义和回显的关键
 	go func() {
 		defer stdin.Close()
-
-		// A. 发送初始化序列：
-		// - stty -echo: 彻底禁用终端回显（防止收到重复的指令字符串）
-		// - export TERM=dumb: 告诉内部程序不要发 ANSI 颜色代码
-		// - set +v / set +x: 确保执行过程完全静默
 		setup := "stty -echo 2>/dev/null; export TERM=dumb; set +v; set +x\n"
 		_, _ = stdin.Write([]byte(setup))
-
-		// B. 写入真正的脚本内容
-		// 因为是通过 Stdin 写入，所以 targetCommand 里的引号不再需要担心转义问题
 		_, _ = stdin.Write([]byte(targetCommand + "\n"))
-
-		// C. 强制收尾
 		_, _ = stdin.Write([]byte("exit\n"))
 	}()
 
-	// 9. 等待 WSL 任务完成
 	err = wslcmd.Wait()
-
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
-			// 将内部 Linux 进程的退出码原样返回给 DevPod
 			os.Exit(exitError.ExitCode())
 		}
 		logs.Errorf("WSL process finished with error: %v", err)
 		return err
 	}
+
+	return nil
+}
+
+// runOnLinux Linux 环境下使用 tunnel (Unix socket + gRPC)
+func (cmd *CommandCmd) runOnLinux(
+	ctx context.Context,
+	distro, targetCommand string,
+	logs log.Logger,
+) error {
+	socketPath := tunnel.DefaultSocketPath
+
+	// 1. 注入 agent 到本地
+	agentData, err := agent.GetAgent()
+	if err != nil {
+		return fmt.Errorf("get embedded agent: %w", err)
+	}
+	if len(agentData) > 0 {
+		if err := agent.InstallAgentLocal(agentData); err != nil {
+			return fmt.Errorf("install agent: %w", err)
+		}
+		logs.Infof("Agent installed to %s", agent.AgentPath)
+	}
+
+	// 2. 启动 agent
+	logs.Infof("Starting agent...")
+	agentCmd := exec.CommandContext(ctx, agent.AgentPath)
+	agentCmd.Stdout = os.Stdout
+	agentCmd.Stderr = os.Stderr
+	if err := agentCmd.Start(); err != nil {
+		return fmt.Errorf("start agent: %w", err)
+	}
+
+	// 3. 连接 gRPC
+	logs.Infof("Connecting to %s...", socketPath)
+	time.Sleep(1 * time.Second) // 等待 agent 启动
+
+	client, err := grpcClient.NewClient(socketPath, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to agent: %w", err)
+	}
+	defer client.Close()
+
+	// 4. 执行命令
+	logs.Infof("Executing command: %s", targetCommand)
+	resp, err := client.Start(ctx, targetCommand, "", nil)
+	if err != nil {
+		return fmt.Errorf("start command: %w", err)
+	}
+
+	logs.Infof("Process started with PID: %d", resp.Pid)
+
+	// 5. 等待进程完成
+	// TODO: 等待进程退出并获取状态
+	_ = client
 
 	return nil
 }
