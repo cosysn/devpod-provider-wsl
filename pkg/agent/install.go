@@ -60,3 +60,50 @@ func chmodAgent(distro string) error {
 	cmd := exec.Command("wsl.exe", "-d", distro, "-e", "chmod", "+x", AgentPath)
 	return cmd.Run()
 }
+
+// Linux 版本函数
+
+// InstallAgentLocal 在本地 Linux 安装 agent
+func InstallAgentLocal(data []byte) error {
+	if needsUpgradeLocal() {
+		if err := removeAgentLocal(); err != nil {
+			return fmt.Errorf("remove old agent: %w", err)
+		}
+	}
+
+	if err := writeAgentLocal(data); err != nil {
+		return fmt.Errorf("write agent: %w", err)
+	}
+
+	if err := chmodAgentLocal(); err != nil {
+		return fmt.Errorf("chmod agent: %w", err)
+	}
+
+	return nil
+}
+
+func needsUpgradeLocal() bool {
+	cmd := exec.Command("sh", "-c",
+		fmt.Sprintf("[ -f '%s' ] && '%s' --version 2>/dev/null || echo 'not found'", AgentPath, AgentPath))
+	output, err := cmd.Output()
+	if err != nil {
+		return true
+	}
+	return !strings.Contains(string(output), AgentVersion)
+}
+
+func removeAgentLocal() error {
+	cmd := exec.Command("rm", "-f", AgentPath)
+	return cmd.Run()
+}
+
+func writeAgentLocal(data []byte) error {
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("cat > '%s'", AgentPath))
+	cmd.Stdin = bytes.NewReader(data)
+	return cmd.Run()
+}
+
+func chmodAgentLocal() error {
+	cmd := exec.Command("chmod", "+x", AgentPath)
+	return cmd.Run()
+}
