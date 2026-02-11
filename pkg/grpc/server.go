@@ -14,21 +14,13 @@ import (
 type WSLServer struct {
 	pb.UnimplementedDevPodWSLServiceServer
 	mu        sync.Mutex
-	processes map[int]*processContext
-}
-
-type processContext struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	stderr io.ReadCloser
-	done   chan struct{}
+	processes map[int]*exec.Cmd
 }
 
 // NewWSLServer creates a new WSLServer instance
 func NewWSLServer() *WSLServer {
 	return &WSLServer{
-		processes: make(map[int]*processContext),
+		processes: make(map[int]*exec.Cmd),
 	}
 }
 
@@ -77,22 +69,8 @@ func (s *WSLServer) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartR
 		stderr.Close()
 	}()
 
-	procCtx := &processContext{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: stdout,
-		stderr: stderr,
-		done:   make(chan struct{}),
-	}
-
-	// 等待进程结束
-	go func() {
-		cmd.Wait()
-		close(procCtx.done)
-	}()
-
 	s.mu.Lock()
-	s.processes[cmd.Process.Pid] = procCtx
+	s.processes[cmd.Process.Pid] = cmd
 	s.mu.Unlock()
 
 	return &pb.StartResponse{Pid: int32(cmd.Process.Pid)}, nil
@@ -100,24 +78,15 @@ func (s *WSLServer) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartR
 
 func (s *WSLServer) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
 	s.mu.Lock()
-	procCtx, ok := s.processes[int(req.Pid)]
+	cmd, ok := s.processes[int(req.Pid)]
 	s.mu.Unlock()
 
 	if !ok {
 		return &pb.StopResponse{ExitCode: 0}, nil
 	}
 
-	// 关闭 stdin
-	procCtx.stdin.Close()
-
-	// 等待进程结束
-	select {
-	case <-procCtx.done:
-	case <-ctx.Done():
-		// 超时，强制 kill
-		procCtx.cmd.Process.Kill()
-		<-procCtx.done
-	}
+	cmd.Process.Kill()
+	cmd.Wait()
 
 	s.mu.Lock()
 	delete(s.processes, int(req.Pid))
@@ -127,65 +96,95 @@ func (s *WSLServer) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResp
 }
 
 func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
+	// 解析命令
+	req, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+
+	// 获取命令
+	var command string
+	switch data := req.Data.(type) {
+	case *pb.ExecRequest_Input:
+		command = data.Input
+	}
+
+	// 启动 shell 执行命令
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Dir = ""
+	cmd.Env = os.Environ()
+
+	// 创建 pipes
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		stderr.Close()
+		return err
+	}
+
+	// 异步转发 stdin
+	go func() {
+		for {
+			req, err := stream.Recv()
+			if err != nil {
+				break
+			}
+			switch data := req.Data.(type) {
+			case *pb.ExecRequest_Input:
+				stdin.Write([]byte(data.Input))
+			case *pb.ExecRequest_Eof:
+				stdin.Close()
+			}
+		}
+	}()
+
+	// 读取输出
+	buf := make([]byte, 4096)
 	for {
-		req, err := stream.Recv()
+		n, err := stdout.Read(buf)
+		if n > 0 {
+			stream.Send(&pb.ExecResponse{Stdout: buf[:n]})
+		}
 		if err == io.EOF {
-			return nil
+			break
 		}
 		if err != nil {
-			return err
-		}
-
-		// 处理输入
-		switch data := req.Data.(type) {
-		case *pb.ExecRequest_Input:
-			// TODO: 发送输入到进程
-			_ = data
-		case *pb.ExecRequest_Eof:
-			// TODO: 关闭 stdin
-			_ = data
-		}
-
-		// TODO: 返回输出
-		resp := &pb.ExecResponse{
-			Stdout: []byte{},
-			Stderr: []byte{},
-			Done:   false,
-		}
-		if err := stream.Send(resp); err != nil {
-			return err
+			break
 		}
 	}
+
+	cmd.Wait()
+	stdout.Close()
+	stderr.Close()
+
+	return nil
 }
 
 func (s *WSLServer) Stdin(stream pb.DevPodWSLService_StdinServer) error {
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		// 获取进程并发送输入
-		s.mu.Lock()
-		procCtx, ok := s.processes[int(req.Pid)]
-		s.mu.Unlock()
-
-		if ok && procCtx.stdin != nil {
-			procCtx.stdin.Write(req.Content)
-		}
-	}
+	return nil
 }
 
 func (s *WSLServer) Stdout(req *pb.Empty, stream pb.DevPodWSLService_StdoutServer) error {
-	_ = req
 	return nil
 }
 
 func (s *WSLServer) Stderr(req *pb.Empty, stream pb.DevPodWSLService_StderrServer) error {
-	_ = req
 	return nil
 }
 

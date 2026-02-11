@@ -3,16 +3,19 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/cosysn/devpod-provider-wsl/pkg/agent"
 	"github.com/cosysn/devpod-provider-wsl/pkg/tunnel"
 	grpcClient "github.com/cosysn/devpod-provider-wsl/pkg/grpc"
+	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
 	"github.com/cosysn/devpod-provider-wsl/pkg/wsl"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
@@ -185,22 +188,39 @@ func (cmd *CommandCmd) runOnLinux(
 	}
 	defer client.Close()
 
-	// 4. 执行命令
-	logs.Infof("Executing command: %s", targetCommand)
-	resp, err := client.Start(ctx, targetCommand, "", nil)
+	// 4. 使用 Exec RPC 进行交互式命令执行
+	logs.Infof("Executing: %s", targetCommand)
+	execClient, err := client.Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("start command: %w", err)
+		return fmt.Errorf("exec failed: %w", err)
 	}
 
-	logs.Infof("Process started with PID: %d", resp.Pid)
+	// 发送命令
+	if err := execClient.Send(&pb.ExecRequest{
+		Data: &pb.ExecRequest_Input{Input: targetCommand + "\n"},
+	}); err != nil {
+		return fmt.Errorf("send command failed: %w", err)
+	}
 
-	// 5. 转发 stdin 到进程
+	// 5. 转发 stdin 到 Exec 流
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				client.SendStdin(ctx, resp.Pid, buf[:n])
+				execClient.Send(&pb.ExecRequest{
+					Data: &pb.ExecRequest_Input{Input: string(buf[:n])},
+				})
+			}
+			if err == io.EOF {
+				// 发送 EOF
+				execClient.Send(&pb.ExecRequest{
+					Data: &pb.ExecRequest_Eof{},
+				})
+				break
 			}
 			if err != nil {
 				break
@@ -208,9 +228,29 @@ func (cmd *CommandCmd) runOnLinux(
 		}
 	}()
 
-	// 6. 等待进程退出
-	time.Sleep(100 * time.Millisecond) // 等待 goroutine 启动
-	_, _ = client.Stop(ctx, resp.Pid)
+	// 6. 接收输出
+	for {
+		resp, err := execClient.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("recv failed: %w", err)
+		}
+
+		if len(resp.Stdout) > 0 {
+			os.Stdout.Write(resp.Stdout)
+		}
+		if len(resp.Stderr) > 0 {
+			os.Stderr.Write(resp.Stderr)
+		}
+		if resp.Done {
+			break
+		}
+	}
+
+	// 等待 stdin 转发结束
+	wg.Wait()
 
 	return nil
 }
