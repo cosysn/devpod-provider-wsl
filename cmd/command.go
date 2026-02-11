@@ -98,8 +98,8 @@ func (cmd *CommandCmd) runOnWindows(
 	os.Setenv("WSL_PROXY", "0")
 	os.Setenv("DONT_SET_WSL_PROXY", "1")
 
-	// 构建 WSL 启动参数
-	wslArgs := []string{"-d", distro, "--", "bash", "--noprofile", "--norc", "-s"}
+	// 构建 WSL 启动参数 - 直接执行命令，不需要交互式 shell
+	wslArgs := []string{"-d", distro, "--", "bash", "-c", targetCommand}
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
@@ -129,12 +129,10 @@ func (cmd *CommandCmd) runOnWindows(
 		return err
 	}
 
+	// 转发 stdin 到 WSL（保持流打开直到 WSL 退出）
 	go func() {
-		defer stdin.Close()
-		setup := "stty -echo 2>/dev/null; export TERM=dumb; set +v; set +x\n"
-		_, _ = stdin.Write([]byte(setup))
-		_, _ = stdin.Write([]byte(targetCommand + "\n"))
-		_, _ = stdin.Write([]byte("exit\n"))
+		io.Copy(stdin, os.Stdin)
+		stdin.Close()
 	}()
 
 	err = wslcmd.Wait()
