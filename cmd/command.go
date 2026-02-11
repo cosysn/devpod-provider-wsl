@@ -98,7 +98,7 @@ func (cmd *CommandCmd) runOnWindows(
 	os.Setenv("WSL_PROXY", "0")
 	os.Setenv("DONT_SET_WSL_PROXY", "1")
 
-	// 构建 WSL 启动参数 - 直接执行命令，不需要交互式 shell
+	// 构建 WSL 启动参数 - 直接执行命令
 	wslArgs := []string{"-d", distro, "--", "bash", "-c", targetCommand}
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
@@ -129,9 +129,22 @@ func (cmd *CommandCmd) runOnWindows(
 		return err
 	}
 
-	// 转发 stdin 到 WSL（保持流打开直到 WSL 退出）
+	// 转发 stdin 到 WSL（过滤 Windows 换行符 CR）
 	go func() {
-		io.Copy(stdin, os.Stdin)
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := os.Stdin.Read(buf)
+			if n > 0 {
+				// 过滤掉 \r 字符
+				filtered := filterCRBytes(buf[:n])
+				if len(filtered) > 0 {
+					stdin.Write(filtered)
+				}
+			}
+			if readErr != nil {
+				break
+			}
+		}
 		stdin.Close()
 	}()
 
@@ -272,4 +285,15 @@ func (cmd *CommandCmd) runOnLinux(
 	wg.Wait()
 
 	return nil
+}
+
+// filterCRBytes 过滤字节数组中的 \r 字符
+func filterCRBytes(input []byte) []byte {
+	result := make([]byte, 0, len(input))
+	for i := 0; i < len(input); i++ {
+		if input[i] != '\r' {
+			result = append(result, input[i])
+		}
+	}
+	return result
 }
