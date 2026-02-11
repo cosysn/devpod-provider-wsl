@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -100,22 +99,7 @@ func (cmd *CommandCmd) runOnWindows(
 	os.Setenv("DONT_SET_WSL_PROXY", "1")
 
 	// 构建 WSL 启动参数
-	// 如果命令已经是 shell 格式，直接传递；否则使用 bash -c 包装
-	wslArgs := []string{"-d", distro}
-	if strings.HasPrefix(targetCommand, "bash -c") || strings.HasPrefix(targetCommand, "sh -c") {
-		// 命令已包含 shell 包装，去掉内层的 bash -c 执行实际命令
-		// 提取内层命令: "bash -c 'echo hi'" -> "echo hi"
-		parts := strings.SplitN(targetCommand, "'", 3)
-		if len(parts) >= 2 {
-			// 执行内层命令
-			innerCmd := parts[1]
-			wslArgs = append(wslArgs, "--", "bash", "-c", innerCmd)
-		} else {
-			wslArgs = append(wslArgs, "--", "bash", "-c", targetCommand)
-		}
-	} else {
-		wslArgs = append(wslArgs, "--", "bash", "-c", targetCommand)
-	}
+	wslArgs := []string{"-d", distro, "--", "bash", "-c", targetCommand}
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
