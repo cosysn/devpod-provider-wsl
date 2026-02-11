@@ -60,6 +60,24 @@ func (c *Client) Exec(ctx context.Context) (pb.DevPodWSLService_ExecClient, erro
 	return c.client.Exec(ctx)
 }
 
+// Stdin 发送 stdin 数据（客户端流）
+func (c *Client) Stdin(ctx context.Context) (pb.DevPodWSLService_StdinClient, error) {
+	return c.client.Stdin(ctx)
+}
+
+// SendStdin 发送 stdin 数据
+func (c *Client) SendStdin(ctx context.Context, data []byte) error {
+	stream, err := c.Stdin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&pb.Data{Content: data}); err != nil {
+		return err
+	}
+	_, err = stream.CloseAndRecv()
+	return err
+}
+
 // Status 获取 agent 状态
 func (c *Client) Status(ctx context.Context) (*pb.AgentStatus, error) {
 	return c.client.Status(ctx, &pb.Empty{})
