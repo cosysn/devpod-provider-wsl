@@ -194,9 +194,23 @@ func (cmd *CommandCmd) runOnLinux(
 
 	logs.Infof("Process started with PID: %d", resp.Pid)
 
-	// 5. 等待进程完成
-	// TODO: 等待进程退出并获取状态
-	_ = client
+	// 5. 转发 stdin 到进程
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				client.SendStdin(ctx, resp.Pid, buf[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// 6. 等待进程退出
+	time.Sleep(100 * time.Millisecond) // 等待 goroutine 启动
+	_, _ = client.Stop(ctx, resp.Pid)
 
 	return nil
 }
