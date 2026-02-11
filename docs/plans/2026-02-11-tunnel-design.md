@@ -155,45 +155,85 @@ service DevPodWSLService {
 | Stdout | 服务端流 | 接收 stdout 数据 |
 | Stderr | 服务端流 | 接收 stderr 数据 |
 
-## 执行流程
+## 执行方式
+
+### Windows 执行方式
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Windows (Provider - command)                            │
 │                                                         │
-│  1. 连接 Unix Socket                                    │
-│  2. gRPC: Start(command)                               │
-│         │                                               │
-│         ▼ WSL                                           │
-│  ┌─────────────────────────────────────────┐            │
-│  │ Agent                                   │            │
-│  │                                          │            │
-│  │  fork + exec command                    │            │
-│  │         │                               │            │
-│  │         ▼                               │            │
-│  │  子进程执行命令                           │            │
-│  │         │                               │            │
-│  │  ┌──────┴──────┐                        │            │
-│  │  │             │                        │            │
-│  │  ▼             ▼                        │            │
-│  │ stdout     stderr                       │            │
-│  │         │                               │            │
-│  │  子进程退出                              │            │
-│  │         │                               │            │
-│  │  agent 检测到子进程退出                  │            │
-│  │         │                               │            │
-│  │  agent 退出                             │            │
-│  └─────────────────────────────────────────┘            │
-│              │                                               │
-│              ▼                                               │
-│  3. gRPC 返回结果                                          │
-│  4. WSL 进程退出                                           │
+│  DevPod ──► command ──► gRPC Client                     │
+│                            │                            │
+│                            ▼                            │
+│                     Unix Socket Client                   │
+│                            │                            │
+│                            │ 9p                         │
+└────────────────────────────┼────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│ WSL (Agent 进程)                                        │
+│                                                         │
+│  1. 创建 Unix Socket Server (/var/tmp/devpod.sock)     │
+│  2. 启动 Yamux Session                                  │
+│  3. 启动 gRPC Server                                    │
+│  4. 接收命令、执行、返回结果                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**说明**：
-- Agent 按需启动，命令执行完后退出
-- Agent 跟随子进程生命周期，子进程退出后 agent 退出
+### Linux 执行方式（测试）
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Linux (Provider - command)                              │
+│                                                         │
+│  DevPod ──► command ──► gRPC Client                     │
+│                            │                            │
+│                            ▼                            │
+│                     Unix Socket Client                   │
+│                            │                            │
+│                            │ 本地连接                   │
+└────────────────────────────┼────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│ Linux (Agent 进程)                                       │
+│                                                         │
+│  1. 创建 Unix Socket Server (/var/tmp/devpod.sock)     │
+│  2. 启动 Yamux Session                                  │
+│  3. 启动 gRPC Server                                    │
+│  4. 接收命令、执行、返回结果                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 路径一致性
+
+| 路径 | Windows | Linux |
+|-----|---------|-------|
+| Agent 路径 | `/var/tmp/devpod-agent` | `/var/tmp/devpod-agent` |
+| Socket 路径 | `/var/tmp/devpod.sock` | `/var/tmp/devpod.sock` |
+
+### 环境检测
+
+```go
+func isWindows() bool {
+    return runtime.GOOS == "windows"
+}
+```
+
+- **Windows**: 通过 9p 访问 WSL 内的 Unix socket
+- **Linux**: 直接访问本地 Unix socket
+
+## 测试方案
+
+### Linux 本地测试
+
+1. 编译 provider（Linux 版本）
+2. 注入 agent 到 `/var/tmp/devpod-agent`
+3. 启动 agent（本地 Unix socket server）
+4. command 连接 socket，执行 gRPC 调用
+5. 验证：连接、数据传输、命令执行
 
 ## 文件结构
 
