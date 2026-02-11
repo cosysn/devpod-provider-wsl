@@ -1,3 +1,4 @@
 *.exe
 release/
 pkg/agent/agent-linux
+nul

@@ -1,5 +1,5 @@
 name: devpod-provider-wsl
-version: v0.0.2
+version: v0.0.1
 description: DevPod provider for WSL environments
 options:
   WSL_DISTRO:
@@ -16,7 +16,7 @@ binaries:
     - os: windows
       arch: amd64
       path: ./devpod-provider-wsl.exe
-      checksum: 81d3afa773b65638ce2163936a40bfa8fc72791fc30391122d1ac18ff8f3e382
+      checksum: 308e546057f5c0003840582a752d8637199211c41c1af619b4af794f46a4ce5c
 exec:
   init: ${DEVPOD_PROVIDER_WSL} init
   command: ${DEVPOD_PROVIDER_WSL} command

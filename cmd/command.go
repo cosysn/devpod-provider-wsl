@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
-	"sync"
+	"strings"
 	"syscall"
 	"time"
 
@@ -76,7 +76,7 @@ func (cmd *CommandCmd) Run(
 	return cmd.runOnLinux(ctx, distro, targetCommand, logs)
 }
 
-// runOnWindows Windows 环境下使用 stdin pipe
+// runOnWindows Windows 环境下执行命令
 func (cmd *CommandCmd) runOnWindows(
 	ctx context.Context,
 	distro, targetCommand string,
@@ -98,16 +98,27 @@ func (cmd *CommandCmd) runOnWindows(
 	os.Setenv("WSL_PROXY", "0")
 	os.Setenv("DONT_SET_WSL_PROXY", "1")
 
-	// 构建 WSL 启动参数
-	wslArgs := []string{"-d", distro, "--", "bash", "-c", targetCommand}
+	// 检测命令是否需要 base64 编码（inject script 有 ping-pong）
+	needsDecode := isInjectScript(targetCommand)
+
+	var wslArgs []string
+
+	if needsDecode {
+		// Inject script：先 decode 再 source（保持函数定义）
+		encodedCmd := base64.StdEncoding.EncodeToString([]byte(targetCommand))
+		scriptFile := "/tmp/devpod-inject.sh"
+		wslArgs = []string{"-d", distro, "bash", "-c",
+			fmt.Sprintf("echo '%s' | base64 -d > %s && source %s", encodedCmd, scriptFile, scriptFile)}
+	} else {
+		// SSH 或直接命令：通过 stdin 传递命令
+		// 直接执行，不经过 base64
+		wslArgs = []string{"-d", distro, "-e", "bash", "--login", "-c", targetCommand}
+	}
 
 	wslcmd := exec.CommandContext(ctx, "wsl.exe", wslArgs...)
 
-	stdin, err := wslcmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
+	// 直接连接 stdin/stdout/stderr
+	wslcmd.Stdin = os.Stdin
 	wslcmd.Stdout = os.Stdout
 	wslcmd.Stderr = os.Stderr
 
@@ -128,12 +139,6 @@ func (cmd *CommandCmd) runOnWindows(
 		return fmt.Errorf("failed to start wsl: %w", err)
 	}
 
-	// 转发 stdin 到 WSL
-	go func() {
-		io.Copy(stdin, os.Stdin)
-		stdin.Close()
-	}()
-
 	err = wslcmd.Wait()
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
@@ -143,6 +148,27 @@ func (cmd *CommandCmd) runOnWindows(
 	}
 
 	return nil
+}
+
+// isInjectScript 检测命令是否是 inject script（需要 base64 decode）
+func isInjectScript(cmd string) bool {
+	// Inject script 通常包含特定的 ping-pong 模式
+	if strings.Contains(cmd, "DEVPOD_PING") && strings.Contains(cmd, "read") {
+		return true
+	}
+	// 如果命令看起来像 base64 编码的（长度较长，只含特定字符）
+	if len(cmd) > 200 {
+		// 尝试验证是否是有效的 base64
+		if _, err := base64.StdEncoding.DecodeString(cmd); err == nil {
+			// 解码后检查是否包含 inject script 特征
+			decoded, _ := base64.StdEncoding.DecodeString(cmd)
+			if strings.Contains(string(decoded), "DEVPOD_PING") {
+				return true
+			}
+		}
+	}
+	// 简单命令不需要 decode
+	return false
 }
 
 // runOnLinux Linux 环境下使用 tunnel (Unix socket + gRPC)
