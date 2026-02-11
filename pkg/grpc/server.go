@@ -97,7 +97,7 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 	}
 	defer ptyFile.Close()
 
-	// 异步转发 stdin 到 PTY
+	// 异步转发 stdin 到 PTY (过滤 Windows 换行符 CR)
 	go func() {
 		for {
 			req, err := stream.Recv()
@@ -106,7 +106,11 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 			}
 			switch data := req.Data.(type) {
 			case *pb.ExecRequest_Input:
-				ptyFile.Write([]byte(data.Input))
+				// 过滤掉 \r 字符 (Windows 换行符 CRLF -> LF)
+				input := filterCR(data.Input)
+				if len(input) > 0 {
+					ptyFile.Write([]byte(input))
+				}
 			case *pb.ExecRequest_Eof:
 				ptyFile.Close()
 			}
@@ -152,4 +156,15 @@ func (s *WSLServer) Status(ctx context.Context, req *pb.Empty) (*pb.AgentStatus,
 
 func (s *WSLServer) Upload(stream pb.DevPodWSLService_UploadServer) error {
 	return nil
+}
+
+// filterCR 过滤掉 Windows 换行符中的 \r
+func filterCR(input string) string {
+	result := make([]byte, 0, len(input))
+	for i := 0; i < len(input); i++ {
+		if input[i] != '\r' {
+			result = append(result, input[i])
+		}
+	}
+	return string(result)
 }
