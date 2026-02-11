@@ -8,7 +8,7 @@ service DevPodWSLService {
     rpc Start(StartRequest) returns (StartResponse);
     rpc Stop(StopRequest) returns (StopResponse);
     rpc Exec(stream ExecRequest) returns (stream ExecResponse);
-    rpc Stdin(stream Data) returns (Empty);
+    rpc Stdin(stream StdinRequest) returns (Empty);
     rpc Stdout(Empty) returns (stream Data);
     rpc Stderr(Empty) returns (stream Data);
     rpc Status(Empty) returns (AgentStatus);
@@ -48,7 +48,13 @@ message ExecResponse {
 }
 
 message Data {
-    bytes content = 1;
+    int32 pid = 1;
+    bytes content = 2;
+}
+
+message StdinRequest {
+    int32 pid = 1;
+    bytes content = 2;
 }
 
 message Empty {}

@@ -36,7 +36,7 @@ type DevPodWSLServiceClient interface {
 	Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*StartResponse, error)
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
 	Exec(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecRequest, ExecResponse], error)
-	Stdin(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Data, Empty], error)
+	Stdin(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StdinRequest, Empty], error)
 	Stdout(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Data], error)
 	Stderr(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Data], error)
 	Status(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AgentStatus, error)
@@ -84,18 +84,18 @@ func (c *devPodWSLServiceClient) Exec(ctx context.Context, opts ...grpc.CallOpti
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DevPodWSLService_ExecClient = grpc.BidiStreamingClient[ExecRequest, ExecResponse]
 
-func (c *devPodWSLServiceClient) Stdin(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Data, Empty], error) {
+func (c *devPodWSLServiceClient) Stdin(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StdinRequest, Empty], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &DevPodWSLService_ServiceDesc.Streams[1], DevPodWSLService_Stdin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[Data, Empty]{ClientStream: stream}
+	x := &grpc.GenericClientStream[StdinRequest, Empty]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DevPodWSLService_StdinClient = grpc.ClientStreamingClient[Data, Empty]
+type DevPodWSLService_StdinClient = grpc.ClientStreamingClient[StdinRequest, Empty]
 
 func (c *devPodWSLServiceClient) Stdout(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Data], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -165,7 +165,7 @@ type DevPodWSLServiceServer interface {
 	Start(context.Context, *StartRequest) (*StartResponse, error)
 	Stop(context.Context, *StopRequest) (*StopResponse, error)
 	Exec(grpc.BidiStreamingServer[ExecRequest, ExecResponse]) error
-	Stdin(grpc.ClientStreamingServer[Data, Empty]) error
+	Stdin(grpc.ClientStreamingServer[StdinRequest, Empty]) error
 	Stdout(*Empty, grpc.ServerStreamingServer[Data]) error
 	Stderr(*Empty, grpc.ServerStreamingServer[Data]) error
 	Status(context.Context, *Empty) (*AgentStatus, error)
@@ -189,7 +189,7 @@ func (UnimplementedDevPodWSLServiceServer) Stop(context.Context, *StopRequest) (
 func (UnimplementedDevPodWSLServiceServer) Exec(grpc.BidiStreamingServer[ExecRequest, ExecResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Exec not implemented")
 }
-func (UnimplementedDevPodWSLServiceServer) Stdin(grpc.ClientStreamingServer[Data, Empty]) error {
+func (UnimplementedDevPodWSLServiceServer) Stdin(grpc.ClientStreamingServer[StdinRequest, Empty]) error {
 	return status.Errorf(codes.Unimplemented, "method Stdin not implemented")
 }
 func (UnimplementedDevPodWSLServiceServer) Stdout(*Empty, grpc.ServerStreamingServer[Data]) error {
@@ -269,11 +269,11 @@ func _DevPodWSLService_Exec_Handler(srv interface{}, stream grpc.ServerStream) e
 type DevPodWSLService_ExecServer = grpc.BidiStreamingServer[ExecRequest, ExecResponse]
 
 func _DevPodWSLService_Stdin_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(DevPodWSLServiceServer).Stdin(&grpc.GenericServerStream[Data, Empty]{ServerStream: stream})
+	return srv.(DevPodWSLServiceServer).Stdin(&grpc.GenericServerStream[StdinRequest, Empty]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DevPodWSLService_StdinServer = grpc.ClientStreamingServer[Data, Empty]
+type DevPodWSLService_StdinServer = grpc.ClientStreamingServer[StdinRequest, Empty]
 
 func _DevPodWSLService_Stdout_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(Empty)

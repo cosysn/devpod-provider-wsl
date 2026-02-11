@@ -65,13 +65,13 @@ func (c *Client) Stdin(ctx context.Context) (pb.DevPodWSLService_StdinClient, er
 	return c.client.Stdin(ctx)
 }
 
-// SendStdin 发送 stdin 数据
-func (c *Client) SendStdin(ctx context.Context, data []byte) error {
+// SendStdin 发送 stdin 数据到指定进程
+func (c *Client) SendStdin(ctx context.Context, pid int32, data []byte) error {
 	stream, err := c.Stdin(ctx)
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.Data{Content: data}); err != nil {
+	if err := stream.Send(&pb.StdinRequest{Pid: pid, Content: data}); err != nil {
 		return err
 	}
 	_, err = stream.CloseAndRecv()

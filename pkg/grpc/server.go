@@ -168,8 +168,14 @@ func (s *WSLServer) Stdin(stream pb.DevPodWSLService_StdinServer) error {
 			return err
 		}
 
-		// TODO: 发送输入到进程 (需要 PID)
-		_ = req
+		// 获取进程并发送输入
+		s.mu.Lock()
+		procCtx, ok := s.processes[int(req.Pid)]
+		s.mu.Unlock()
+
+		if ok && procCtx.stdin != nil {
+			procCtx.stdin.Write(req.Content)
+		}
 	}
 }
 
