@@ -202,8 +202,11 @@ func (cmd *CommandCmd) runOnLinux(
 		return fmt.Errorf("send command failed: %w", err)
 	}
 
-	// 5. 转发 stdin 到 Exec 流
+	// 5. 并行处理：转发 stdin 和接收 stdout
 	var wg sync.WaitGroup
+	stdinDone := make(chan struct{})
+
+	// Stdin 转发 goroutine
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -216,10 +219,16 @@ func (cmd *CommandCmd) runOnLinux(
 				})
 			}
 			if err == io.EOF {
-				// 发送 EOF
-				execClient.Send(&pb.ExecRequest{
-					Data: &pb.ExecRequest_Eof{},
-				})
+				// 只有当 recv 循环结束时才发送 EOF
+				select {
+				case <-stdinDone:
+					// 接收已经结束，发送 EOF 关闭 stdin
+					execClient.Send(&pb.ExecRequest{
+						Data: &pb.ExecRequest_Eof{},
+					})
+				default:
+					// 等待接收结束
+				}
 				break
 			}
 			if err != nil {
@@ -228,10 +237,14 @@ func (cmd *CommandCmd) runOnLinux(
 		}
 	}()
 
-	// 6. 接收输出
+	// Stdout 接收循环
+	stdinClosed := false
 	for {
 		resp, err := execClient.Recv()
 		if err == io.EOF {
+			// 标记接收已结束
+			close(stdinDone)
+			stdinClosed = true
 			break
 		}
 		if err != nil {
@@ -245,11 +258,19 @@ func (cmd *CommandCmd) runOnLinux(
 			os.Stderr.Write(resp.Stderr)
 		}
 		if resp.Done {
+			// 命令执行完成
+			close(stdinDone)
+			stdinClosed = true
 			break
 		}
 	}
 
-	// 等待 stdin 转发结束
+	// 如果 stdin 还没关闭，等待它
+	if !stdinClosed {
+		close(stdinDone)
+	}
+
+	// 等待 stdin goroutine 结束
 	wg.Wait()
 
 	return nil

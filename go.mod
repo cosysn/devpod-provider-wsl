@@ -3,6 +3,7 @@ module github.com/cosysn/devpod-provider-wsl
 go 1.24.0
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/hashicorp/yamux v0.1.1
 	github.com/loft-sh/devpod v0.0.3-0.20230512100016-aee23bbc9aad
 	github.com/spf13/cobra v1.10.2

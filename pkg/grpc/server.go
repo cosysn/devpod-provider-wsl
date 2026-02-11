@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sync"
 
+	"github.com/creack/pty"
 	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
 )
 
@@ -33,40 +34,16 @@ func (s *WSLServer) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartR
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	// 创建 stdin pipe
-	stdin, err := cmd.StdinPipe()
+	// 创建 PTY
+	ptyFile, err := pty.Start(cmd)
 	if err != nil {
-		return nil, err
-	}
-
-	// 创建 stdout/stderr pipe
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		return nil, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdin.Close()
-		stdout.Close()
-		return nil, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		stderr.Close()
 		return nil, err
 	}
 
 	// 异步读取输出到 os.Stdout/os.Stderr
 	go func() {
-		io.Copy(os.Stdout, stdout)
-		stdout.Close()
-	}()
-	go func() {
-		io.Copy(os.Stderr, stderr)
-		stderr.Close()
+		io.Copy(os.Stdout, ptyFile)
+		ptyFile.Close()
 	}()
 
 	s.mu.Lock()
@@ -109,36 +86,18 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 		command = data.Input
 	}
 
-	// 启动 shell 执行命令
+	// 启动 PTY shell
 	cmd := exec.Command("/bin/sh", "-c", command)
-	cmd.Dir = ""
 	cmd.Env = os.Environ()
 
-	// 创建 pipes
-	stdin, err := cmd.StdinPipe()
+	// 创建 PTY
+	ptyFile, err := pty.Start(cmd)
 	if err != nil {
 		return err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdin.Close()
-		stdout.Close()
-		return err
-	}
+	defer ptyFile.Close()
 
-	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		stderr.Close()
-		return err
-	}
-
-	// 异步转发 stdin
+	// 异步转发 stdin 到 PTY
 	go func() {
 		for {
 			req, err := stream.Recv()
@@ -147,17 +106,17 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 			}
 			switch data := req.Data.(type) {
 			case *pb.ExecRequest_Input:
-				stdin.Write([]byte(data.Input))
+				ptyFile.Write([]byte(data.Input))
 			case *pb.ExecRequest_Eof:
-				stdin.Close()
+				ptyFile.Close()
 			}
 		}
 	}()
 
-	// 读取输出
+	// 读取 PTY 输出
 	buf := make([]byte, 4096)
 	for {
-		n, err := stdout.Read(buf)
+		n, err := ptyFile.Read(buf)
 		if n > 0 {
 			stream.Send(&pb.ExecResponse{Stdout: buf[:n]})
 		}
@@ -170,8 +129,7 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 	}
 
 	cmd.Wait()
-	stdout.Close()
-	stderr.Close()
+	stream.Send(&pb.ExecResponse{Done: true})
 
 	return nil
 }
