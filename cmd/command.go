@@ -137,10 +137,7 @@ func (cmd *CommandCmd) runOnWindows(
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				filtered := filterCRBytes(buf[:n])
-				if len(filtered) > 0 {
-					ptyFile.Write(filtered)
-				}
+				ptyFile.Write(buf[:n])
 			}
 			if err != nil {
 				break
@@ -285,15 +282,4 @@ func (cmd *CommandCmd) runOnLinux(
 	wg.Wait()
 
 	return nil
-}
-
-// filterCRBytes 过滤字节数组中的 \r 字符
-func filterCRBytes(input []byte) []byte {
-	result := make([]byte, 0, len(input))
-	for i := 0; i < len(input); i++ {
-		if input[i] != '\r' {
-			result = append(result, input[i])
-		}
-	}
-	return result
 }

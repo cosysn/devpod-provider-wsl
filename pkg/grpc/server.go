@@ -106,29 +106,19 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 			}
 			switch data := req.Data.(type) {
 			case *pb.ExecRequest_Input:
-				// 过滤掉 \r 字符 (Windows 换行符 CRLF -> LF)
-				input := filterCR(data.Input)
-				if len(input) > 0 {
-					ptyFile.Write([]byte(input))
-				}
+				ptyFile.Write([]byte(data.Input))
 			case *pb.ExecRequest_Eof:
 				ptyFile.Close()
 			}
 		}
 	}()
 
-	// 读取 PTY 输出 (过滤 Windows 换行符 CR 和 ANSI 控制序列)
+	// 读取 PTY 输出
 	buf := make([]byte, 4096)
 	for {
 		n, err := ptyFile.Read(buf)
 		if n > 0 {
-			// 过滤掉 \r 字符
-			filtered := filterCRBytes(buf[:n])
-			// 过滤掉 ANSI 转义序列 (ESC ]...BEL)
-			filtered = filterANSI(filtered)
-			if len(filtered) > 0 {
-				stream.Send(&pb.ExecResponse{Stdout: filtered})
-			}
+			stream.Send(&pb.ExecResponse{Stdout: buf[:n]})
 		}
 		if err == io.EOF {
 			break
@@ -162,63 +152,4 @@ func (s *WSLServer) Status(ctx context.Context, req *pb.Empty) (*pb.AgentStatus,
 
 func (s *WSLServer) Upload(stream pb.DevPodWSLService_UploadServer) error {
 	return nil
-}
-
-// filterCR 过滤掉 Windows 换行符中的 \r
-func filterCR(input string) string {
-	result := make([]byte, 0, len(input))
-	for i := 0; i < len(input); i++ {
-		if input[i] != '\r' {
-			result = append(result, input[i])
-		}
-	}
-	return string(result)
-}
-
-// filterCRBytes 过滤字节数组中的 \r
-func filterCRBytes(input []byte) []byte {
-	result := make([]byte, 0, len(input))
-	for i := 0; i < len(input); i++ {
-		if input[i] != '\r' {
-			result = append(result, input[i])
-		}
-	}
-	return result
-}
-
-// filterANSI 过滤 ANSI 转义序列 (ESC ]...BEL 或 ESC [...)
-// 移除终端控制字符如窗口标题、颜色设置等
-func filterANSI(input []byte) []byte {
-	result := make([]byte, 0, len(input))
-	i := 0
-	for i < len(input) {
-		// 检测 ESC ] 序列 (窗口标题、颜色等控制序列)
-		if input[i] == 0x1b && i+1 < len(input) && input[i+1] == ']' {
-			// 跳过直到 BEL (0x07) 或另一个 ESC
-			for i < len(input) && !(input[i] == 0x07 || (input[i] == 0x1b && i+1 < len(input) && input[i+1] != ']')) {
-				i++
-			}
-			// 跳过 BEL 或后续的普通字符
-			if i < len(input) {
-				i++
-			}
-			continue
-		}
-		// 检测 ESC [ 序列 (CSI 序列，如颜色等)
-		if input[i] == 0x1b && i+1 < len(input) && input[i+1] == '[' {
-			// 跳过直到普通字符
-			for i < len(input) && input[i] >= 0x20 && input[i] <= 0x3f {
-				i++
-			}
-			// 跳过参数字节
-			for i < len(input) && input[i] >= 0x30 && input[i] <= 0x7e {
-				i++
-			}
-			continue
-		}
-		// 普通字符，添加到结果
-		result = append(result, input[i])
-		i++
-	}
-	return result
 }
