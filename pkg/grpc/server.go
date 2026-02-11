@@ -117,12 +117,16 @@ func (s *WSLServer) Exec(stream pb.DevPodWSLService_ExecServer) error {
 		}
 	}()
 
-	// 读取 PTY 输出
+	// 读取 PTY 输出 (过滤 Windows 换行符 CR)
 	buf := make([]byte, 4096)
 	for {
 		n, err := ptyFile.Read(buf)
 		if n > 0 {
-			stream.Send(&pb.ExecResponse{Stdout: buf[:n]})
+			// 过滤掉 \r 字符
+			filtered := filterCRBytes(buf[:n])
+			if len(filtered) > 0 {
+				stream.Send(&pb.ExecResponse{Stdout: filtered})
+			}
 		}
 		if err == io.EOF {
 			break
@@ -167,4 +171,15 @@ func filterCR(input string) string {
 		}
 	}
 	return string(result)
+}
+
+// filterCRBytes 过滤字节数组中的 \r
+func filterCRBytes(input []byte) []byte {
+	result := make([]byte, 0, len(input))
+	for i := 0; i < len(input); i++ {
+		if input[i] != '\r' {
+			result = append(result, input[i])
+		}
+	}
+	return result
 }

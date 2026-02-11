@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"net"
+	"sync"
 	"time"
 
 	pb "github.com/cosysn/devpod-provider-wsl/pkg/grpc/proto"
@@ -12,8 +13,10 @@ import (
 
 // Client gRPC 客户端
 type Client struct {
-	conn   *grpc.ClientConn
-	client pb.DevPodWSLServiceClient
+	conn      *grpc.ClientConn
+	client    pb.DevPodWSLServiceClient
+	stdinLock sync.Mutex
+	stdinStream pb.DevPodWSLService_StdinClient
 }
 
 // NewClient 创建 gRPC 客户端，连接到 Unix socket
@@ -60,21 +63,40 @@ func (c *Client) Exec(ctx context.Context) (pb.DevPodWSLService_ExecClient, erro
 	return c.client.Exec(ctx)
 }
 
-// Stdin 发送 stdin 数据（客户端流）
-func (c *Client) Stdin(ctx context.Context) (pb.DevPodWSLService_StdinClient, error) {
-	return c.client.Stdin(ctx)
-}
+// OpenStdin 打开 stdin 流
+func (c *Client) OpenStdin(ctx context.Context) error {
+	c.stdinLock.Lock()
+	defer c.stdinLock.Unlock()
 
-// SendStdin 发送 stdin 数据到指定进程
-func (c *Client) SendStdin(ctx context.Context, pid int32, data []byte) error {
-	stream, err := c.Stdin(ctx)
+	stream, err := c.client.Stdin(ctx)
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.StdinRequest{Pid: pid, Content: data}); err != nil {
-		return err
+	c.stdinStream = stream
+	return nil
+}
+
+// SendStdin 发送 stdin 数据（需要先调用 OpenStdin）
+func (c *Client) SendStdin(pid int32, data []byte) error {
+	c.stdinLock.Lock()
+	defer c.stdinLock.Unlock()
+
+	if c.stdinStream == nil {
+		return nil
 	}
-	_, err = stream.CloseAndRecv()
+	return c.stdinStream.Send(&pb.StdinRequest{Pid: pid, Content: data})
+}
+
+// CloseStdin 关闭 stdin 流
+func (c *Client) CloseStdin() error {
+	c.stdinLock.Lock()
+	defer c.stdinLock.Unlock()
+
+	if c.stdinStream == nil {
+		return nil
+	}
+	_, err := c.stdinStream.CloseAndRecv()
+	c.stdinStream = nil
 	return err
 }
 
